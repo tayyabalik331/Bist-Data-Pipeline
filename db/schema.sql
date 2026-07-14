@@ -30,3 +30,23 @@ CREATE TABLE ingestion_runs (
     rows_upserted INT DEFAULT 0,
     error         TEXT
 );
+-- 1. unindexed copy
+CREATE TABLE ohlcv_noidx AS SELECT * FROM ohlcv_daily;
+
+-- 2. inflate it to ~5M rows
+INSERT INTO ohlcv_noidx
+SELECT instrument_id, ts - (g * 400), open, high, low, close, adj_close, volume
+FROM ohlcv_daily, generate_series(1, 300) g;
+
+-- 3. time the query on the indexed table
+EXPLAIN ANALYZE
+SELECT * FROM ohlcv_daily
+WHERE instrument_id = 1 AND ts BETWEEN '2023-01-01' AND '2023-12-31';
+
+-- 4. time it on the unindexed one
+EXPLAIN ANALYZE
+SELECT * FROM ohlcv_noidx
+WHERE instrument_id = 1 AND ts BETWEEN '2023-01-01' AND '2023-12-31';
+
+-- 5. bin the junk
+DROP TABLE ohlcv_noidx;
