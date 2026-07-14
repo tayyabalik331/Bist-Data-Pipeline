@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: bist_db
+    environment:
+      POSTGRES_USER: bist
+      POSTGRES_PASSWORD: bist
+      POSTGRES_DB: bist
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+
+volumes:
+  pgdata:
