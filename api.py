@@ -80,3 +80,69 @@ def get_candles(
         return {"symbol": symbol.upper(), "count": len(candles), "candles": candles}
     finally:
         conn.close()
+
+@app.get("/instruments/{symbol}/disclosures")
+def get_disclosures(symbol: str, limit: int = 20):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM instruments WHERE symbol = %s", (symbol.upper(),))
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(404, f"Unknown symbol: {symbol}")
+
+            cur.execute(
+                """
+                SELECT d.publish_date, d.subject,
+                       s.sentiment, s.score, s.reasoning, s.model
+                FROM disclosures d
+                LEFT JOIN disclosure_sentiment s ON s.disclosure_id = d.id
+                WHERE d.instrument_id = %s
+                ORDER BY d.publish_date DESC NULLS LAST
+                LIMIT %s
+                """,
+                (row["id"], limit),
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+@app.get("/instruments/{symbol}/sentiment")
+def get_sentiment_score(symbol: str):
+    """Aggregate sentiment for a ticker — the mini F-RAY score."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM instruments WHERE symbol = %s", (symbol.upper(),))
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(404, f"Unknown symbol: {symbol}")
+
+            cur.execute(
+                """
+                SELECT
+                    COUNT(s.disclosure_id)                        AS scored_disclosures,
+                    ROUND(AVG(s.score), 3)                        AS avg_score,
+                    COUNT(*) FILTER (WHERE s.sentiment='positive') AS positive,
+                    COUNT(*) FILTER (WHERE s.sentiment='neutral')  AS neutral,
+                    COUNT(*) FILTER (WHERE s.sentiment='negative') AS negative,
+                    MAX(d.publish_date)                           AS latest_disclosure
+                FROM disclosures d
+                JOIN disclosure_sentiment s ON s.disclosure_id = d.id
+                WHERE d.instrument_id = %s
+                """,
+                (row["id"],),
+            )
+            agg = cur.fetchone()
+
+        signal = "neutral"
+        if agg["avg_score"] is not None:
+            if agg["avg_score"] > 0.1:
+                signal = "bullish"
+            elif agg["avg_score"] < -0.1:
+                signal = "bearish"
+
+        return {"symbol": symbol.upper(), "signal": signal, **agg}
+    finally:
+        conn.close()
